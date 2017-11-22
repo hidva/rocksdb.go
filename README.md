@@ -42,3 +42,4 @@ hh
     
     所以去掉了 env/port 模块. (好吧我承认是我懒得写的缘故==
 
+-   关于注释; 除非有必要, 否则 rocksdb.go 中大部分 struct/func 等都不会有注释性信息. 因为我在学习 rocksdb 时已经做了炒鸡多的注释说明, 参见 [rocksdb@study](https://github.com/pp-qq/rocksdb/tree/study)
