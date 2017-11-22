@@ -30,4 +30,15 @@ rocksdb.go benchmark:
 hh
 ```
 
+## 实现细节
+
+一些没地方放置的实现细节都会塞到这里.
+
+-   去掉原 rocksdb env/port 模块. 按我理解 env/port 主要有如下几个功能: 
+    
+    方便移植; 这个直接使用 golang 标准库也能达到方便移植的目的, 所以不需要单独整个 env/port.
+    
+    可以很方便地 hook; 比如实现一个 SlowIOEnv, 限制 io 速率; 从而观察 leveldb 在低 io 下的性能等参数. 这个可以通过 docker/cgroups 等类似工具来控制. 所以也不需要单独整个 env/port
+    
+    所以去掉了 env/port 模块. (好吧我承认是我懒得写的缘故==
 
