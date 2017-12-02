@@ -2,7 +2,8 @@ package rockslog
 
 const (
 	/* record type 枚举值. */
-	kFullType = iota + 1
+	kZeroType = iota
+	kFullType
 	kFirstType
 	kMiddleType
 	kLastType

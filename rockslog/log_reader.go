@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"unsafe"
 
 	"github.com/pp-qq/rocksdb.go/rocksutil/crc32c"
 )
@@ -15,13 +14,13 @@ const (
 )
 
 type Reporter interface {
-	Corruption(size uint64, err error)
+	Corruption(size int, err error)
 }
 
 type Reader struct {
 	file     *os.File
 	reporter Reporter
-	checksum bool
+	check    bool
 
 	/* block 用来存放 log file 中 one block 的内容.
 
@@ -31,7 +30,7 @@ type Reader struct {
 	kBlockSize.
 	*/
 	block      [kBlockSize]byte
-	start, end uint
+	start, end int
 	last_block bool
 }
 
@@ -42,7 +41,7 @@ func NewReader(path string, reporter Reporter, checksum bool) (*Reader, error) {
 	}
 	// open success, 注意关闭 file.
 
-	return &Reader{file: file, reporter: reporter, checksum: checksum}, nil
+	return &Reader{file: file, reporter: reporter, check: checksum}, nil
 }
 
 func (this *Reader) Close() error {
@@ -57,7 +56,53 @@ func (this *Reader) Close() error {
 由于出错而导致 ReadRecord() 返回 nil. 这点与 rocksdb 不同, rocksdb 在出错时会略过出错的 record 继续往下读
 取. */
 func (this *Reader) ReadRecord() []byte {
-	// checksum 为 0 时的特殊处理.
+	// 若 infragment 为 false, 表明尚未遇到 kFirstType, 此时 len(recordbuf) == 0.
+	// 若 infragment 为 true, 表明已经遇到了 kFirstType, 此时 recordbuf 存放着相应的内容.
+	infragment := false
+	var recordbuf []byte
+
+	for {
+		switch recordtype, fragment := this.readPhysicalRecord(); recordtype {
+		case kFullType:
+			if infragment {
+				this.reportCorruption(len(recordbuf), fmt.Errorf("partial record without end"))
+				return nil
+			}
+			return fragment
+
+		case kFirstType:
+			if infragment {
+				this.reportCorruption(len(recordbuf), fmt.Errorf("partial record without end"))
+				return nil
+			}
+			recordbuf = append(recordbuf, fragment...)
+			infragment = true
+		case kMiddleType:
+			if !infragment {
+				const errmsg = "missing start of fragmented record"
+				this.reportCorruption(len(fragment), fmt.Errorf(errmsg))
+				return nil
+			}
+			recordbuf = append(recordbuf, fragment...)
+		case kLastType:
+			if !infragment {
+				const errmsg = "missing start of fragmented record"
+				this.reportCorruption(len(fragment), fmt.Errorf(errmsg))
+				return nil
+			}
+			recordbuf = append(recordbuf, fragment...)
+			return recordbuf
+		case kEOF:
+			if infragment {
+				this.reportCorruption(len(recordbuf), fmt.Errorf("partial record without end"))
+			}
+			return nil
+		default:
+			const errmsg = "unknown record type"
+			this.reportCorruption(len(fragment)+len(recordbuf), fmt.Errorf(errmsg))
+			return nil
+		}
+	}
 }
 
 func isZeros(data []byte) bool {
@@ -77,9 +122,9 @@ func (this *Reader) zeroBlock() bool {
 	return isZeros(this.blockBuffer())
 }
 
-func (this *Reader) reportCorruption(size uint64, err error) {
+func (this *Reader) reportCorruption(size int, err error) {
 	if this.reporter != nil {
-		this.report.Corruption(size, err)
+		this.reporter.Corruption(size, err)
 	}
 	return
 }
@@ -88,7 +133,7 @@ func (this *Reader) reportCorruption(size uint64, err error) {
 log_format.go 中定义. 若由于 io error 或者文件内容被毁害导致无法读取一个 record, 则返回 kEOF, nil.
 */
 func (this *Reader) readPhysicalRecord() (int, []byte) {
-	// 注意兼容 rocksdb 中 PosixMmapFile
+	// 注意兼容 rocksdb 中 PosixMmapFile. readPhysicalRecord() 不对 recordtype 进行过多地解读.
 	var err error
 	for {
 		restsize := this.end - this.start
@@ -106,7 +151,7 @@ func (this *Reader) readPhysicalRecord() (int, []byte) {
 					// 后续对 readPhysicalRecord() 的调用将返回 kEOF.
 					this.end = 0
 					this.start = this.end
-					last_block = true
+					this.last_block = true
 
 					this.reportCorruption(kBlockSize, err)
 					return kEOF, nil
@@ -123,13 +168,39 @@ func (this *Reader) readPhysicalRecord() (int, []byte) {
 			} else if this.zeroBlock() {
 				return kEOF, nil
 			} else {
-				this.reportCorruption(restsize, fmt.Errof("truncated record at end of file"))
+				this.reportCorruption(restsize, fmt.Errorf("truncated record at end of file"))
 				return kEOF, nil
 			}
 		}
+		break
 	}
 	// restsize >= kHeaderSize, 如果这时候遇到 zero record type, 就认为是 PosixMmapFile 的填充, 就会
 	// 认为文件已经结束了.
-	// 未完待续
 
+	bufstart := this.start
+	checksum := binary.LittleEndian.Uint32(this.block[bufstart:this.end])
+	bufstart += 4
+	length := int(binary.LittleEndian.Uint16(this.block[bufstart:this.end]))
+	bufstart += 2
+	recordtype := this.block[bufstart]
+	bufstart += 1
+	if length > this.end-bufstart {
+		this.reportCorruption(this.end-this.start, fmt.Errorf("bad record length"))
+		return kEOF, nil
+	}
+	if recordtype == kZeroType {
+		if checksum != 0 || length != 0 {
+			// 此时这里可能是一个 recordtype 为 kZeroType 的合法 record.
+			this.reportCorruption(kHeaderSize+length, fmt.Errorf("unknown record type"))
+		}
+		return kEOF, nil
+	}
+	if this.check &&
+		checksum != crc32c.Mask(crc32c.Value(this.block[bufstart-1:bufstart+length])) {
+		this.reportCorruption(length, fmt.Errorf("checksum mismatch"))
+		return kEOF, nil
+	}
+
+	this.start = bufstart + length
+	return int(recordtype), this.block[bufstart:this.start]
 }
