@@ -2,10 +2,17 @@ rocksdb.go 使用纯 golang 实现的 rocksdb, 与 rocksdb 100% 兼容.
 
 目前与 [rocksdb-f67e15e](https://github.com/facebook/rocksdb/commit/f67e15e) 兼容. 随着对 rocksdb 源码的学习, rocksdb.go 也会随之提高兼容 rocksdb 的版本.
 
-rocksdb benchmark:
+## Benchmark
+
+benchmark 参数: 
 
 ```sh
 $ ./db_bench --num=100000 --histogram=0 --compression_ratio=0.33 --value_size=100 --write_buffer_size=1048576
+```
+
+rocksdb benchmark:
+
+```sh
 open         :   7845.879 micros/op;
 writeseq     :      8.017 micros/op;  13.3 MB/s      
 writeseq     :     15.145 micros/op;   7.1 MB/s      
