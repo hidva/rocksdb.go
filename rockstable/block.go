@@ -3,8 +3,6 @@ package rockstable
 import (
 	"encoding/binary"
 	"fmt"
-	"math"
-	"unsafe"
 
 	"github.com/pp-qq/rocksdb.go/rocksutil"
 )
@@ -12,35 +10,44 @@ import (
 type block struct {
 	// data, 不包括 restarts 数组部分, 只包含 kv 数据, data 为 nil 表明为空.
 	// restarts, 可能为 nil, 表明为空. 可能存在 i, restarts[i] >= len(data) 这种不合法情况!
+	// data, restarts 同时为空, 或者同时不为空.
 	data     []byte
 	restarts []int
 }
 
-func newBlock(data []byte) (*block, error) {
-	if len(data) < unsafe.Sizeof(uint32(0)) {
+func NewBlock(data []byte) (*block, error) {
+	if len(data) < rocksutil.UintLen32 {
 		return nil, fmt.Errorf("BadArg")
 	}
-	split := len(data) - unsafe.Sizeof(uint32(0))
-	numrestarts := binary.LittleEndian.Uint32(data[split:])
+	split := len(data) - rocksutil.UintLen32
+	numrestarts := int(binary.LittleEndian.Uint32(data[split:]))
 	data = data[:split]
 
 	restarts := make([]int, 0, numrestarts)
-	sizerestarts := numrestarts * unsafe.Sizeof(uint32(0))
+	sizerestarts := numrestarts * rocksutil.UintLen32
 	if len(data) < sizerestarts {
 		return nil, fmt.Errorf("BadArg")
 	}
 	split = len(data) - sizerestarts
 	restartsdata := data[split:]
 	data = data[:split]
-	for len(restartsdata) >= unsafe.Sizeof(uint32(0)) {
-		restarts = append(restarts, binary.LittleEndian.Uint32(restartsdata))
-		restartsdata = restartsdata[unsafe.Sizeof(uint32(0)):]
+	for len(restartsdata) >= rocksutil.UintLen32 {
+		restarts = append(restarts, int(binary.LittleEndian.Uint32(restartsdata)))
+		restartsdata = restartsdata[rocksutil.UintLen32:]
 	}
 
 	if !((len(data) == 0 && len(restarts) == 0) || (len(data) > 0 && len(restarts) > 0)) {
 		return nil, fmt.Errorf("BadArg")
 	}
 	return &block{data: data, restarts: restarts}, nil
+}
+
+func (this *block) NewIterator(cmp rocksutil.Comparator) rocksutil.Iterator {
+	if len(this.data) <= 0 {
+		return rocksutil.NewEmptyIterator()
+	} else {
+		return newBlockIter(this, cmp)
+	}
 }
 
 /*
@@ -50,19 +57,22 @@ func newBlock(data []byte) (*block, error) {
 返回的 k 可能是 this.data 或者 anchor 的 slice. 返回的 v 可能是 this.data 的 slice.
 */
 func (this *block) parse(offset int, anchor []byte) (k, v []byte, nextoffset int, err error) {
-	shared, readed := rocksutil.U32varint(this.data[offset:])
+	tmp, readed := rocksutil.U32varint(this.data[offset:])
+	shared := int(tmp)
 	if readed <= 0 || shared > len(anchor) {
 		err = fmt.Errorf("invalid shared_bytes")
 		return
 	}
 	offset += readed
-	unshared, readed := rocksutil.U32varint(this.data[offset:])
+	tmp, readed = rocksutil.U32varint(this.data[offset:])
+	unshared := int(tmp)
 	if readed <= 0 {
 		err = fmt.Errorf("invalid unshared_bytes")
 		return
 	}
 	offset += readed
-	valsize, readed := rocksutil.U32varint(this.data[offset:])
+	tmp, readed = rocksutil.U32varint(this.data[offset:])
+	valsize := int(tmp)
 	if readed <= 0 {
 		err = fmt.Errorf("invalid value_length")
 		return

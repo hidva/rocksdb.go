@@ -3,6 +3,11 @@ package rocksutil
 import (
 	"encoding/binary"
 	"math"
+	"unsafe"
+)
+
+const (
+	UintLen32 = int(unsafe.Sizeof(uint32(0)))
 )
 
 // 语义等同于 binary.Uvarint(), 除了返回的是 uint32 类型.
