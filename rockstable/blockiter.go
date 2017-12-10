@@ -69,7 +69,7 @@ func (this *blockIter) Seek(key []byte) {
 
 	this.curptr = this.blk.restarts[idx]
 	this.key = nil
-	for {
+	for this.curptr < len(this.blk.data) {
 		this.key, this.val, this.nextptr, this.err = this.blk.parse(this.curptr, this.key)
 		if this.err != nil {
 			return
@@ -80,6 +80,7 @@ func (this *blockIter) Seek(key []byte) {
 		}
 		this.curptr = this.nextptr
 	}
+	this.key = nil
 	return
 }
 
