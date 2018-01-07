@@ -3,11 +3,20 @@ package rocksutil
 import (
 	"encoding/binary"
 	"math"
-	"unsafe"
 )
 
 const (
-	UintLen32 = int(unsafe.Sizeof(uint32(0)))
+	UintLen32 = 4
+)
+
+// MaxUint, MinUint 的类型总是 uint 类型. MinInt, MaxInt 总是 int 类型.
+// 仅当 unsafe.Sizeof(int) == Sizeof(uint) 时下面才是正确的. 感谢 go spec 指定: int, same size as uint
+const (
+	MinUint = uint(0)
+	MaxUint = ^MinUint
+
+	MaxInt = int(MaxUint >> 1)
+	MinInt = ^MaxInt
 )
 
 // 语义等同于 binary.Uvarint(), 除了返回的是 uint32 类型.

@@ -73,7 +73,7 @@ func (this *Writer) WriteRecord(record []byte) error {
 		fragment_end := fragment_start + fragment_size
 		// 此时 recordptr <= fragment_start <= fragment_end <= len(record)
 
-		recordtype := 0
+		recordtype := byte(0)
 		if fragment_start == 0 {
 			if fragment_end == len(record) {
 				recordtype = kFullType
@@ -110,7 +110,7 @@ func (this *Writer) Close() error {
 	return this.file.Close()
 }
 
-func (this *Writer) writePhysicalRecord(recordtype int, fragment []byte) error {
+func (this *Writer) writePhysicalRecord(recordtype byte, fragment []byte) error {
 	var tmpbuf [kHeaderSize]byte
 	var err error
 
@@ -118,7 +118,7 @@ func (this *Writer) writePhysicalRecord(recordtype int, fragment []byte) error {
 	checksum = crc32c.Mask(crc32c.Extend(checksum, fragment))
 	binary.LittleEndian.PutUint32(tmpbuf[:], checksum)
 	binary.LittleEndian.PutUint16(tmpbuf[4:], uint16(len(fragment)))
-	tmpbuf[6] = byte(recordtype)
+	tmpbuf[6] = recordtype
 	_, err = this.file.Write(tmpbuf[:])
 	if err != nil {
 		return err
